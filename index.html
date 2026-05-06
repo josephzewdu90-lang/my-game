@@ -2,21 +2,31 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Alien Defender 20</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0, minimum-scale=1.0">
+    <title>Alien Fight: Realistic Combat</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <style>
-        body { margin: 0; background: #000; color: #fff; overflow: hidden; font-family: 'Courier New', Courier, monospace; touch-action: none; }
-        canvas { display: block; image-rendering: pixelated; }
-        #ui { position: absolute; top: 10px; left: 10px; pointer-events: none; }
-        #level { font-size: 24px; color: #0f0; text-shadow: 2px 2px #000; }
+        body { margin: 0; padding: 0; background-color: #000; overflow: hidden; font-family: 'Consolas', monospace; color: #fff; touch-action: none; }
+        #gameCanvas { display: block; width: 100vw; height: 100vh; }
+        #ui { position: absolute; top: 10px; left: 10px; pointer-events: none; text-shadow: 2px 2px 0 #000; }
+        #scoreBoard { font-size: 20px; color: #0f0; }
+        #gameOverScreen {
+            display: none; position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%); text-align: center;
+        }
+        #gameOverScreen h1 { font-size: 40px; color: #f00; margin-bottom: 20px; }
     </style>
 </head>
 <body>
     <div id="ui">
-        <div id="level">Level: 1</div>
-        <div id="score">Score: 0</div>
+        <div id="levelDisplay">LEVEL: 1/20</div>
+        <div id="scoreBoard">Score: 0</div>
     </div>
+    
+    <div id="gameOverScreen">
+        <h1>GAME OVER</h1>
+    </div>
+
     <canvas id="gameCanvas"></canvas>
 
 <script>
@@ -25,24 +35,60 @@
 
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
-    const lvlEl = document.getElementById('level');
-    const scoreEl = document.getElementById('score');
+    const levelEl = document.getElementById('levelDisplay');
+    const scoreEl = document.getElementById('scoreBoard');
+    const goScreen = document.getElementById('gameOverScreen');
 
-    let level = 1, score = 0, gameOver = false;
-    let player = { x: 0, y: 0, w: 40, h: 40 };
-    let bullets = [], enemies = [];
-    let enemySpawnTimer = 0;
+    let level = 1;
+    let score = 0;
+    let gameOver = false;
+    let totalLoadedImages = 0;
+    
+    // Core Game Objects (Positions and basic properties)
+    const player = { x: 0, y: 0, w: 60, h: 60, speed: 10 };
+    const bullets = [];
+    const enemies = [];
+    const motherShips = [];
 
-    function init() {
+    // Realistic Asset Loader (Requires 'ship.png', 'alien.png', etc.)
+    const images = {
+        ship: new Image(),
+        alien: new Image(),
+        boss: new Image(),
+        bg: new Image()
+    };
+    
+    // Function to check if images are loaded before starting
+    const imgLoaded = () => { totalLoadedImages++; if (totalLoadedImages === 4) initGame(); };
+    
+    // Provide YOUR direct URLs or local file paths here
+    images.ship.src = 'ship.png'; // Must be in the same folder
+    images.alien.src = 'alien.png'; // Must be in the same folder
+    images.boss.src = 'mothership.png'; // Must be in the same folder
+    images.bg.src = 'background.jpg'; // Must be in the same folder
+
+    images.ship.onload = imgLoaded;
+    images.alien.onload = imgLoaded;
+    images.boss.onload = imgLoaded;
+    images.bg.onload = imgLoaded;
+
+    function initGame() {
         canvas.width = window.innerWidth;
         canvas.height = window.innerHeight;
-        player.x = canvas.width / 2 - 20;
-        player.y = canvas.height - 80;
-        requestAnimationFrame(update);
+        player.x = canvas.width / 2 - player.w / 2;
+        player.y = canvas.height - player.h - 80;
+        
+        // Haptic feedback test (optional, check support)
+        if (tg.HapticFeedback && tg.HapticFeedback.notificationOccurred) {
+            tg.HapticFeedback.notificationOccurred('success');
+        }
+
+        requestAnimationFrame(gameLoop);
     }
 
-    // Touch Controls
-    window.addEventListener('touchmove', (e) => {
+    // Controls: Simple Touch Drag (Realistic feeling)
+    canvas.addEventListener('touchmove', (e) => {
+        if (gameOver) return;
         const touch = e.touches[0];
         player.x = touch.clientX - player.w / 2;
         // Keep inside screen
@@ -50,89 +96,134 @@
         if (player.x > canvas.width - player.w) player.x = canvas.width - player.w;
     });
 
-    // Auto-fire bullets
+    // AUTO-FIRE
     setInterval(() => {
-        if (!gameOver) bullets.push({ x: player.x + 18, y: player.y, w: 4, h: 10 });
+        if (!gameOver) bullets.push({ x: player.x + (player.w/2) - 3, y: player.y, w: 6, h: 20 });
     }, 200);
 
+    // Dynamic Spawn Logic (Difficulty scales with LEVEL)
     function spawnEnemy() {
-        const size = 30;
+        const difficultyFactor = level * 1.5;
         enemies.push({
-            x: Math.random() * (canvas.width - size),
-            y: -size,
-            w: size,
-            h: size,
-            speed: 1 + (level * 0.5) // Speed increases with level
+            x: Math.random() * (canvas.width - player.w),
+            y: -player.h,
+            w: 50,
+            h: 50,
+            speed: (2 + Math.random() * 2) * difficultyFactor
         });
     }
 
-    function update() {
+    // Level-specific Boss Spawn (levels 5, 10, 15, 20)
+    function spawnBoss() {
+        if (motherShips.length === 0) {
+            motherShips.push({
+                x: canvas.width / 2 - 125, // Large boss
+                y: -150,
+                w: 250,
+                h: 150,
+                speed: 3,
+                health: level * 100 // Scales with level
+            });
+        }
+    }
+
+    function checkCollision(obj1, obj2) {
+        return obj1.x < obj2.x + obj2.w && obj1.x + obj1.w > obj2.x && obj1.y < obj2.y + obj2.h && obj1.y + obj1.h > obj2.y;
+    }
+
+    function gameLoop() {
         if (gameOver) return;
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        // --- 1. Draw Background (Realistic Space) ---
+        ctx.drawImage(images.bg, 0, 0, canvas.width, canvas.height);
 
-        // Draw Player (Pixel Art Style)
-        ctx.fillStyle = "#00ff00";
-        ctx.fillRect(player.x + 15, player.y, 10, 10);
-        ctx.fillRect(player.x, player.y + 10, 40, 20);
-        ctx.fillRect(player.x + 5, player.y + 30, 30, 5);
+        // --- 2. Update and Draw Player ---
+        ctx.drawImage(images.ship, player.x, player.y, player.w, player.h);
 
-        // Update & Draw Bullets
-        ctx.fillStyle = "#ffff00";
-        bullets.forEach((b, i) => {
-            b.y -= 7;
-            ctx.fillRect(b.x, b.y, b.w, b.h);
-            if (b.y < 0) bullets.splice(i, 1);
-        });
-
-        // Update & Draw Enemies
-        ctx.fillStyle = "#ff00ff";
-        enemySpawnTimer++;
-        if (enemySpawnTimer > Math.max(10, 40 - level * 2)) {
-            spawnEnemy();
-            enemySpawnTimer = 0;
+        // --- 3. Manage Bullets ---
+        for (let i = bullets.length - 1; i >= 0; i--) {
+            const b = bullets[i];
+            b.y -= 12; // Realistic bullet speed
+            ctx.fillStyle = "#0f0"; ctx.fillRect(b.x, b.y, b.w, b.h); // Drawing bullets as simple shapes for performance
+            
+            // Bullet goes off screen
+            if (b.y < -b.h) bullets.splice(i, 1);
         }
 
-        enemies.forEach((e, i) => {
+        // --- 4. Manage Enemies (Scales Difficulty) ---
+        enemySpawnTimer = level < 5 ? 60 : (60 - level * 2); // Faster spawn in later levels
+        if (Date.now() % enemySpawnTimer === 0) spawnEnemy(); 
+
+        for (let i = enemies.length - 1; i >= 0; i--) {
+            const e = enemies[i];
             e.y += e.speed;
-            // Simple alien shape
-            ctx.fillRect(e.x + 5, e.y, 20, 10);
-            ctx.fillRect(e.x, e.y + 10, 30, 10);
-            ctx.fillRect(e.x + 5, e.y + 20, 5, 5);
-            ctx.fillRect(e.x + 20, e.y + 20, 5, 5);
+            ctx.drawImage(images.alien, e.x, e.y, e.w, e.h);
 
-            // Collision with Bullets
-            bullets.forEach((b, bi) => {
-                if (b.x < e.x + e.w && b.x + b.w > e.x && b.y < e.y + e.h && b.y + b.h > e.y) {
-                    enemies.splice(i, 1);
-                    bullets.splice(bi, 1);
-                    score += 10;
+            // Collide: Enemy <-> Bullet
+            for (let bi = bullets.length - 1; bi >= 0; bi--) {
+                if (checkCollision(enemies[i], bullets[bi])) {
+                    score += level * 10;
                     scoreEl.innerText = `Score: ${score}`;
-                    if (score % 200 === 0 && level < 20) {
-                        level++;
-                        lvlEl.innerText = `Level: ${level}`;
-                        if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-                    }
+                    enemies.splice(i, 1); bullets.splice(bi, 1);
+                    break;
                 }
-            });
+            }
 
-            // Collision with Player
-            if (player.x < e.x + e.w && player.x + player.w > e.x && player.y < e.y + e.h && player.y + player.h > e.y) {
+            // CRASH: Player <-> Enemy (GAME OVER)
+            if (checkCollision(player, e)) {
                 endGame();
             }
 
+            // Enemy goes off screen
             if (e.y > canvas.height) enemies.splice(i, 1);
-        });
+        }
 
-        requestAnimationFrame(update);
+        // --- 5. Manage Mother Ship (Level-Specific Boss) ---
+        if (level === 5 || level === 10 || level === 15 || level === 20) spawnBoss();
+
+        for (let i = motherShips.length - 1; i >= 0; i--) {
+            const m = motherShips[i];
+            m.y += m.speed / 1.5;
+            if (m.y > canvas.height / 3) m.y = canvas.height / 3; // Position at top third
+            
+            ctx.drawImage(images.boss, m.x, m.y, m.w, m.h);
+
+            // CRASH: Player <-> Boss (GAME OVER)
+            if (checkCollision(player, m)) {
+                endGame();
+            }
+
+            // Damage Boss (Scale)
+            for (let bi = bullets.length - 1; bi >= 0; bi--) {
+                if (checkCollision(motherShips[i], bullets[bi])) {
+                    m.health -= 10; bullets.splice(bi, 1);
+                    if (m.health <= 0) {
+                        motherShips.splice(i, 1); score += 1000;
+                        if (level < 20) level++;
+                        levelEl.innerText = `LEVEL: ${level}/20`;
+                        break;
+                    }
+                }
+            }
+        }
+
+        requestAnimationFrame(gameLoop);
     }
 
     function endGame() {
         gameOver = true;
-        tg.MainButton.setText("GAME OVER - RESTART").show();
+        goScreen.style.display = "block";
+        
+        // Perform Haptic feedback for crash (Vibrate)
+        if (tg.HapticFeedback && tg.HapticFeedback.notificationOccurred) {
+            tg.HapticFeedback.notificationOccurred('error');
+        }
+
+        // Add Telegram button to restart
+        tg.MainButton.setText("RESTART").show();
         tg.MainButton.onClick(() => location.reload());
     }
 
-    init();
 </script>
 </body>
 </html>
